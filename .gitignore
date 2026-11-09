@@ -1,0 +1,4 @@
+# 编译产物
+v1_echo_server
+v2_chat_server
+*.o
