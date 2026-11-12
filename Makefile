@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -pthread
 
-all: v1_echo_server v2_chat_server v3_thread_pool_server
+all: v1_echo_server v2_chat_server v3_thread_pool_server v4_epoll_thread_pool
 
 v1_echo_server: v1_echo_server.c
 	$(CC) $(CFLAGS) -o $@ $<
@@ -12,7 +12,10 @@ v2_chat_server: v2_chat_server.c
 v3_thread_pool_server: v3_thread_pool_server.c
 	$(CC) $(CFLAGS) -o $@ $<
 
+v4_epoll_thread_pool: v4_epoll_thread_pool.c
+	$(CC) $(CFLAGS) -o $@ $<
+
 clean:
-	rm -f v1_echo_server v2_chat_server v3_thread_pool_server
+	rm -f v1_echo_server v2_chat_server v3_thread_pool_server v4_epoll_thread_pool
 
 .PHONY: all clean

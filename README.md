@@ -9,7 +9,7 @@
 | v1 | 阻塞单连接（回声） | 0（一次只服务一个客户端） | ✅ 已完成 |
 | v2 | 多线程（每连接一线程 · 聊天室） | 高（每连接独立线程） | ✅ 已完成 |
 | v3 | 线程池（预创建 worker + 任务队列） | 高（可控线程数，避免频繁建线程） | ✅ 已完成 |
-| v4 | epoll + 线程池（IO 多路复用） | 很高（单线程管上万 fd） | 🚧 规划中 |
+| v4 | epoll + 线程池（IO 多路复用） | 很高（单线程管上万 fd） | ✅ 已完成 |
 
 演进解决的核心问题：v1 一次只能服务一个客户端 → v2 用多线程让连接并发 → v3 用线程池避免"每连接建线程"的开销与失控 → v4 用 epoll 把 IO 等待与业务处理解耦，支撑海量连接。
 
@@ -34,15 +34,23 @@
 - 经典坑全规避：`cond_wait` 用 `while` 防虚假唤醒、持锁只包"取/放任务"不包 IO、fd 用 `malloc` 传参、退出用 `broadcast` + `join`
 - `SIGPIPE` 忽略、循环 `recv/send` 短读写处理
 
+### v4 epoll + 线程池服务器
+- 主线程跑 **epoll 事件循环**一处盯所有 fd：`listenfd` 用 `EPOLLIN`（LT）注册，`clientfd` 用 `EPOLLIN | EPOLLONESHOT` 注册
+- **IO 等待与业务处理解耦**：client 可读时主线程只把 fd 投入任务队列（自己不读数据），worker 取到后非阻塞 `recv` 循环读到 `EAGAIN` → `send` 回声
+- **`EPOLLONESHOT` 防竞态**：fd 触发一次后自动关闭通知，worker 处理完用 `EPOLL_CTL_MOD` **重新 ARM**，保证同一时刻只有一个 worker 动这个 fd
+- v3→v4 本质区别：v3 的 worker 拿到 fd 后**阻塞 `recv`** 占住线程（4 个 worker 同时只能服务 4 个"正在 recv"的连接）；v4 把 IO 等待交给 epoll，**少量线程即可扛海量连接**
+- 关键坑全规避：非阻塞 fd 必须循环读到 `EAGAIN` 才结束本轮、`EPOLLONESHOT` 必须重新 ARM（否则 fd 假死）、`epfd` 设为全局供 worker `epoll_ctl`、持锁只包"取/放任务"不包 IO、send 出错 `DEL+close` 防 fd 泄漏、recv 区分 `EINTR` 重试
+
 ## 编译运行
 
 需要 Linux 环境（gcc + pthread，已在 WSL2 Ubuntu 验证）。
 
 ```bash
-make                          # 编译 v1、v2、v3
+make                          # 编译 v1、v2、v3、v4
 ./v1_echo_server              # 启动回声服务器
 ./v2_chat_server              # 启动聊天室服务器
 ./v3_thread_pool_server       # 启动线程池回声服务器
+./v4_epoll_thread_pool        # 启动 epoll + 线程池回声服务器
 ```
 
 另开终端用 `nc` 测试（聊天室可开多个窗口互发）：
@@ -59,7 +67,8 @@ linux-tcp-server/
 ├── Makefile
 ├── v1_echo_server.c        # 阻塞单连接回声服务器
 ├── v2_chat_server.c        # 多线程聊天室服务器
-└── v3_thread_pool_server.c # 线程池回声服务器
+├── v3_thread_pool_server.c # 线程池回声服务器
+└── v4_epoll_thread_pool.c  # epoll + 线程池回声服务器
 ```
 
 ## 面试常考知识点（本项目已覆盖 / 将覆盖）
@@ -71,7 +80,7 @@ linux-tcp-server/
 - 条件变量与互斥锁协作（`cond_wait` 用 `while` 防虚假唤醒、避免持锁做 IO）
 - `SIGPIPE` 信号与网络服务器健壮性
 - 循环 `recv` / `send` 处理短读短写（partial read / write）
-- 后续 v4 将展开：epoll 多路复用、LT / ET 模式、epoll + 线程池
+- epoll 多路复用、LT / ET 模式、epoll + 线程池（`EPOLLONESHOT` 防竞态、重新 ARM 的必要性）
 
 ## 环境要求
 
